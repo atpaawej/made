@@ -1,4 +1,4 @@
-# agent.md — repo rules for the landing-page-builder POC
+# AGENTS.md — repo rules for the landing-page-builder POC
 
 Read `docs/spec.md` and your ticket in `docs/tickets/` before writing code. This file is the reference; the ticket is the task.
 
