@@ -2,7 +2,7 @@
 
 > Status: POC only. Not a production SaaS. Goal is to prove the core loop in a 2-min video.
 > Stack: Next.js only (App Router) + Tailwind, deployed on Cloudflare Pages. No auth. No database.
-> AI: Kilo Gateway (OpenAI-compatible) free tier.
+> AI: Opencode Zen (OpenAI Responses-compatible) `https://opencode.ai/zen/v1/responses`, model `muse-spark-1.2-contributor-free`, via LLM abstraction (pluggable provider, mock fallback).
 
 ---
 
@@ -53,19 +53,20 @@ Interpretation: a single chat box that (a) creates a full one-page site from a p
 | Framework | Next.js 14+ App Router, TypeScript, Tailwind CSS | Single repo, fast, Cloudflare-compatible |
 | Hosting   | Cloudflare Pages (`next-on-pages` or static export) | Free, required by user |
 | State     | React state + `localStorage` (key: `lpb-poc-v1`) | No DB setup, survives refresh, zero backend |
-| AI        | Kilo Gateway, OpenAI-compatible `POST https://api.kilo.ai/api/gateway/chat/completions`, model `kilo-auto/free` (fallback: local mock generator if no key) | Free tier, one endpoint, BYOK later |
+| AI        | Opencode Zen, OpenAI Responses-compatible `POST https://opencode.ai/zen/v1/responses`, model `muse-spark-1.2-contributor-free` (fallback: local mock generator if no key) — consumed via `lib/llm.ts` abstraction | Free tier, one endpoint, pluggable provider |
 | Validation| `zod` for all AI patches | AI must never break layout |
 | Icons     | `lucide-react` | WhatsApp/Phone/MessageSquare/Undo/RotateCcw |
 
 **Env vars (`.env.local`):**
 
 ```
-KILO_API_KEY=            # required for real AI; if empty app uses mock generator (must still demo)
-KILO_MODEL=kilo-auto/free
+OPENCODE_ZEN_API_KEY=            # required for real AI; if empty app uses mock generator (must still demo)
+OPENCODE_ZEN_MODEL=muse-spark-1.2-contributor-free
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
 **No other secrets. No DB URL. No auth secret.**
+**LLM abstraction:** `lib/llm.ts` exposes `LLMProvider` interface + `getLLM()` factory. `lib/zen.ts` implements the Zen provider (Responses API). Routes never import `zen` directly — only the abstraction — so any `LLMProvider` can be plugged in.
 
 ---
 
@@ -97,8 +98,10 @@ components/
 lib/
   types.ts                 # Site, Section, Props, PatchOp (single source of truth)
   templates.ts             # homeCareTemplate(), carsTemplate(), realEstateTemplate()
-  mock-ai.ts               # keyword-based generator/editor used when KILO_API_KEY empty
-  kilo.ts                  # Kilo Gateway fetch wrapper (server-only)
+  mock-ai.ts               # keyword-based generator/editor used when OPENCODE_ZEN_API_KEY empty
+  llm.ts                   # LLM abstraction: LLMProvider interface + getLLM() factory (server-only)
+  zen.ts                   # Opencode Zen fetch wrapper implementing LLMProvider (server-only)
+  patches.schema.ts        # Zod schemas for PatchOp validation
   prompts.ts               # system prompts + JSON schema for AI (server-only)
   storage.ts               # localStorage load/save, slugify, uid
   whatsapp.ts              # wa.me link builder + prefill templates per niche
@@ -240,7 +243,7 @@ Request: `{ message: string, niche?: Niche }`
 Server:
 1. Detect niche: explicit param > keyword match (`car|dealer|test drive` → cars; `flat|villa|plot|bhk` → real_estate; else home_care).
 2. Extract `businessName` (quoted text or "for X" / "called X", fallback "My Business"), `city` ("in Gurgaon" pattern, fallback "Gurgaon"), `whatsapp` (10-13 digit sequence, fallback template default).
-3. If `KILO_API_KEY` set → call Kilo with `prompts.GENERATE_SYSTEM` + user message + template skeleton; expect `{site_fields, section_overrides}`; merge over template. Else → `mock-ai.generate()` (template + extracted fields).
+3. If `OPENCODE_ZEN_API_KEY` set → call LLM via `lib/llm.ts` abstraction (Zen provider: `lib/zen.ts` → `POST https://opencode.ai/zen/v1/responses` with `prompts.GENERATE_SYSTEM` + user message + template skeleton); expect `{site_fields, section_overrides}`; merge over template. Else → `mock-ai.generate()` (template + extracted fields).
 4. Return `{ site }`. Client sets state, saves localStorage, assistant replies: "Done! I built {Biz} ({niche}). Click WhatsApp to test it, or tell me what to change — e.g. 'change headline' / 'add ECG service at 899'."
 
 ### 8.3 `POST /api/edit`
@@ -248,7 +251,7 @@ Server:
 Request: `{ site: Site, message: string }`
 Server:
 1. Build prompt: `prompts.EDIT_SYSTEM` + current site JSON (trimmed) + user message. Instruct model: "Return ONLY JSON array of PatchOp. No prose."
-2. If key set → Kilo call, Zod-parse `PatchOp[]`, drop invalid, apply server-side to produce `site2`, return `{ patches, site: site2 }`. Else → `mock-ai.edit()` keyword rules:
+2. If key set → LLM via abstraction (Zen provider), Zod-parse `PatchOp[]`, drop invalid, apply server-side to produce `site2`, return `{ patches, site: site2 }`. Else → `mock-ai.edit()` keyword rules:
    - "headline|title" → update hero.title
    - "whatsapp|number" → update_site whatsapp (+callNumber if same)
    - "add X (at|for|price) N" → add_card to services
@@ -312,7 +315,7 @@ POST /api/edit
 ```
 
 - Both routes: `export const runtime = "edge"` (Cloudflare-compatible, no Node APIs).
-- `lib/kilo.ts` (server-only): `fetch("https://api.kilo.ai/api/gateway/chat/completions", {headers:{Authorization: Bearer KEY}, body:{model, messages, temperature:0.2, response_format:{type:"json_object"}}})` with 25s timeout + 1 retry on different free model. Never throw to client — on failure return mock result + `reply` noting "AI offline, used local draft".
+- `lib/llm.ts` (abstraction, server-only): `interface LLMProvider { chat(messages, opts?): Promise<string> }` + `getLLM()` factory. `lib/zen.ts` implements it: `fetch("https://opencode.ai/zen/v1/responses", {headers:{Authorization: Bearer OPENCODE_ZEN_API_KEY}, body:{model: OPENCODE_ZEN_MODEL||"muse-spark-1.2-contributor-free", input: messages, reasoning:{effort:"minimal"} }})` with 25s timeout + 1 retry. Parsing extracts `output[].content[].text`. Never throw to client — on failure return mock result + `reply` noting "AI offline, used local draft".
 - Zod schemas in `lib/patches.schema.ts`, shared import by both routes.
 
 ---
@@ -333,7 +336,7 @@ POST /api/edit
 1. `lib/types.ts` + `lib/templates.ts` + `lib/whatsapp.ts` + `lib/storage.ts` (no UI, test with `tsc`).
 2. `components/LandingRenderer.tsx` + section components + `app/s/[slug]/page.tsx` — hardcode home-care template, verify Caretavya-look + WhatsApp clicks.
 3. `components/ChatPanel.tsx` + `app/page.tsx` + `lib/mock-ai.ts` — full loop works WITHOUT any API key.
-4. `app/api/generate|edit/route.ts` + `lib/kilo.ts` + `lib/prompts.ts` — real AI path with graceful fallback to mock.
+4. `app/api/generate|edit/route.ts` + `lib/llm.ts` + `lib/zen.ts` + `lib/prompts.ts` + `lib/patches.schema.ts` — real AI path via abstraction with graceful fallback to mock.
 5. Polish: mobile toggle, sticky bar, undo, publish/copy, empty states, README demo script.
 6. `npm run build` must pass; `wrangler pages deploy` works.
 
@@ -353,7 +356,8 @@ POST /api/edit
 ## 14. Acceptance Checklist (reviewer ticks before sending to Varun)
 
 - [ ] `npm run dev` → full loop works with NO env key (mock).
-- [ ] With `KILO_API_KEY` → real AI edits return valid patches (check Network tab).
+- [ ] With `OPENCODE_ZEN_API_KEY` → real AI edits return valid patches (check Network tab, POST to `https://opencode.ai/zen/v1/responses`).
+- [ ] Abstraction: swapping `LLMProvider` does not require route changes (prove by swapping mock provider).
 - [ ] All `wa.me` links contain digits + encoded prefill; all `tel:` contain `+digits`.
 - [ ] Undo restores previous state; history survives refresh via localStorage.
 - [ ] `/s/[slug]` works fresh (no editor state) on same browser.

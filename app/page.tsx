@@ -80,27 +80,44 @@ export default function Page() {
     return m;
   }
 
-  // Stub onSend — T05 will replace with real generate/edit calls.
-  // Keeps signature onSend(text: string) so future wiring slots in.
-  function onSend(text: string) {
+  async function onSend(text: string) {
     const userMsg: ChatMsg = { id: uid(), role: "user", text, at: Date.now() };
     setMsgs((prev) => [...prev, userMsg]);
-    if (site) pushHistory(site);
+    const snapshot = site;
+    if (snapshot) pushHistory(snapshot);
     setBusy(true);
-
-    // Simulate async to show loading states / preview overlay
-    setTimeout(() => {
-      // If we have a site, treat as edit stub; otherwise greeting stub
-      if (site) {
-        // No actual site mutation in T04 — just echo
-        appendMsg("assistant", `Got it — "${text}". (AI editing lands in T05. Preview unchanged for now.)`);
+    try {
+      if (!snapshot) {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text }),
+        });
+        const data = (await res.json()) as { site?: Site; error?: string; warning?: string };
+        if (!res.ok || !data.site) throw new Error(data.error || "generate failed");
+        setSite(data.site);
+        setPublishUrl(`${window.location.origin}/s/${data.site.slug}`);
+        appendMsg("assistant", `Done! I built ${data.site.businessName} (${nicheLabel(data.site.niche)}). Click WhatsApp to test it, or tell me what to change — e.g. 'change headline' / 'add ECG service at 899'.`);
+        if (data.warning) appendMsg("system", data.warning);
       } else {
-        appendMsg("assistant", `Nice — you said: "${text}". Page generation will be wired in T05. For now pick another chip or try an edit once a site is loaded via devtools.`);
+        const res = await fetch("/api/edit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ site: snapshot, message: text }),
+        });
+        const data = (await res.json()) as { site?: Site; patches?: unknown[]; reply?: string; error?: string; warning?: string };
+        if (!res.ok || !data.site) throw new Error(data.error || "edit failed");
+        setSite(data.site);
+        appendMsg("assistant", data.reply || "Done.");
+        if (data.warning) appendMsg("system", data.warning);
       }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      appendMsg("system", `Something went wrong: ${msg.slice(0, 200)}. Try again or rephrase.`);
+    } finally {
       setBusy(false);
-      // Auto-switch to preview on mobile after send
       setMobileTab("preview");
-    }, 700);
+    }
   }
 
   function onUndo() {

@@ -10,7 +10,7 @@
 | T03 | Renderer + sections + public page | T01, T02 | `components/LandingRenderer.tsx`, `components/sections/*`, `app/s/[slug]/page.tsx` | M |
 | T04 | Editor shell + chat panel + preview | T01–T03 | `app/page.tsx`, `components/ChatPanel.tsx`, `components/Preview.tsx` | M |
 | T05 | Mock AI (generate + edit, no key needed) | T01, T02 | `lib/mock-ai.ts` | S |
-| T06 | API routes + Kilo + prompts + publish polish | T01–T05 | `app/api/generate/route.ts`, `app/api/edit/route.ts`, `lib/kilo.ts`, `lib/prompts.ts`, `lib/patches.schema.ts` | M |
+| T06 | API routes + LLM abstraction (Zen) + prompts + publish polish | T01–T05 | `app/api/generate/route.ts`, `app/api/edit/route.ts`, `lib/llm.ts`, `lib/zen.ts`, `lib/prompts.ts`, `lib/patches.schema.ts` | M |
 
 Rules for every agent:
 - Read `docs/spec.md` § matching your ticket + `lib/types.ts` first.
