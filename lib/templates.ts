@@ -13,10 +13,10 @@ import { shortId, slugify, uid } from "./storage";
  */
 export function detectNiche(message: string): Niche {
   const lower = message.toLowerCase();
-  if (/(car|dealer|test\s*drive|vehicle|automobile|showroom)/.test(lower)) {
+  if (/\b(car|cars|dealer|test\s*drive|vehicle|automobile|showroom)\b/.test(lower)) {
     return "cars";
   }
-  if (/(flat|villa|plot|bhk|society|apartment|property|real\s*estate|builder)/.test(lower)) {
+  if (/\b(flat|villa|plot|bhk|society|apartment|property|real\s*estate|builder)\b/.test(lower)) {
     return "real_estate";
   }
   return "home_care";
